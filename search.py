@@ -47,6 +47,9 @@ def load(file: str) -> dict:
     return config
 
 def main():
+    global file_handler
+    global stream_handler
+
     parser = argparse.ArgumentParser(
         description=__description__,
         epilog=__epilog__
