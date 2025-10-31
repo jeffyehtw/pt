@@ -46,7 +46,7 @@ class MT():
             logger.error(str(e))
         return None
 
-    def download(self, tid: str) -> None:
+    def download(self, tid: str, detail: dict = None) -> None:
         headers = { 'x-api-key': self.key }
         payload = { 'id': tid }
 
@@ -65,27 +65,30 @@ class MT():
 
                     response = requests.get(url)
                     if response.status_code == 200:
-                        if not self.exist(tid):
-                            logger.info('action=download')
-                            torrent = os.path.join(self.output, f'{tid}.torrent')
-                            with open(torrent, 'wb') as fp:
-                                fp.write(response.content)
-                        else:
-                            logger.info('action=skip')
-                            logger.info('reason=exist')
+                        logger.info('action=download')
+
+                        torrent = os.path.join(self.output, f'{tid}.torrent')
+                        with open(torrent, 'wb') as fp:
+                            fp.write(response.content)
+
+                        if detail is not None:
+                            info = os.path.join(self.output, f'{tid}.info')
+                            with open(info, 'w') as fp:
+                                json.dump(detail, fp, indent=4)
+
+                        if self.list is None:
+                            self.list = []
+                        self.list.append(tid)
                     else:
                         logger.info('action=skip')
                         logger.info('reason=!response')
                 else:
                     logger.info('action=skip')
                     logger.info('reason=!response')
+
             else:
                 logger.info('action=skip')
                 logger.info('reason=!response')
-
-            if self.list is None:
-                self.list = []
-            self.list.append(tid)
 
         except Exception as e:
             logger.error(str(e))

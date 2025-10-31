@@ -87,6 +87,11 @@ def main():
             tid = item['guid']['#text']
             logging.info(f'tid={tid}')
 
+            if mt.exist(tid=tid):
+                logger.info('action=skip')
+                logger.info('reason=exist')
+                continue
+
             detail = mt.detail(tid=tid)
             # skip uncertain torrent
             if detail is None:
@@ -104,7 +109,7 @@ def main():
                 logging.info('reason=!free')
                 continue
 
-            mt.download(tid=tid)
+            mt.download(tid=tid, detail=detail)
 
 if __name__ == '__main__':
     main()

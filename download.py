@@ -69,7 +69,7 @@ def main():
         'mt.json'
     ))
 
-    # # overwrite the configuration if a parameter is provided
+    # overwrite the configuration if a parameter is provided
     if args.key is None:
         args.key = config['key']
     if args.output is None:
@@ -78,11 +78,19 @@ def main():
     with MT(key=args.key, output=args.output) as mt:
         for tid in args.id:
             logging.info(f'tid={tid}')
+
+            if mt.exist(tid=tid):
+                logger.info('action=skip')
+                logger.info('reason=exist')
+                continue
+
+            detail = None
             if args.verbose:
                 detail = mt.detail(tid=tid)
                 logging.info('status=%s', detail['status']['discount'])
                 logging.info('name=%s', detail['name'])
-            mt.download(tid=tid)
+
+            mt.download(tid=tid, detail=detail)
 
 if __name__ == '__main__':
     main()

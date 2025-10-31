@@ -99,10 +99,17 @@ def main():
             size=args.size,
             keyword=args.keyword
         )
+        if items is None:
+            return
 
         for item in items:
             tid = item['id']
             logger.info(f'tid={tid}')
+
+            if mt.exist(tid=tid):
+                logger.info('action=skip')
+                logger.info('reason=exist')
+                continue
 
             detail = mt.detail(tid=tid)
             # skip uncertain torrent
@@ -121,7 +128,7 @@ def main():
                 logger.info('reason=!free')
                 continue
 
-            mt.download(tid=tid)
+            mt.download(tid=tid, detail=detail)
 
 if __name__ == '__main__':
     main()
