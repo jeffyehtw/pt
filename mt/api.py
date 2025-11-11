@@ -15,7 +15,7 @@ class Url():
         self.download = 'https://api.m-team.cc/api/torrent/genDlToken'
         self.search = 'https://api.m-team.cc/api/torrent/search'
 
-class MT():
+class API():
     def __init__(self, rss: str = None, key: str = None, output: str = None):
         self.key = key
         self.rss = rss
