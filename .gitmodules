@@ -1,0 +1,3 @@
+[submodule "syno"]
+	path = syno
+	url = git@github.com:jeffyehtw/syno.git

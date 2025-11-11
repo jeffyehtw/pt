@@ -4,7 +4,7 @@ import json
 import logging
 import argparse
 
-from modules.mt import MT
+from mt.api import MT
 
 __description__ = ''
 __epilog__ = 'Report bugs to <yehcj.tw@gmail.com>'
