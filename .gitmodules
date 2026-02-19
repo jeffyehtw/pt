@@ -1,3 +1,6 @@
 [submodule "syno"]
 	path = syno
 	url = git@github.com:jeffyehtw/syno.git
+[submodule "mt"]
+	path = mt
+	url = git@github.com:jeffyehtw/mt.git
