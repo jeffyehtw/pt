@@ -187,8 +187,8 @@ def main():
 
     # Load configuration files
     base = os.path.dirname(os.path.realpath(__file__))
-    mt_config = load_config(os.path.join(base, 'mt.json'))
-    syno_config = load_config(os.path.join(base, 'synology.json'))
+    mt_config = load(os.path.join(base, 'mt.json'))
+    syno_config = load(os.path.join(base, 'synology.json'))
 
     # Merge configurations
     if args.output is None and mt_config:
@@ -210,7 +210,12 @@ def main():
     process_loaded_files(args)
 
     # Step 2: Get active tasks from Synology
-    active_tids = get_active_tids(args)
+    active_tids = get_active_tids(
+        ip=args.ip,
+        port=args.port,
+        account=args.account,
+        password=args.password
+    )
 
     # Step 3: Clean up orphaned .info files
     if active_tids:
