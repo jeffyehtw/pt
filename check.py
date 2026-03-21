@@ -60,26 +60,33 @@ def clean(path: str, tid: str) -> None:
     if os.path.exists(loaded):
         os.remove(loaded)
 
-def free(task: str, path: str, tid: str) -> bool:
-    '''Check if a task is free'''
+def check_free_status(task: str, path: str, tid: str) -> str:
+    '''
+    Check if a task is free to download.
+    
+    Returns:
+        'free': Task is in free download period
+        'ending': Free period ending soon (< 5 min), should pause
+        'expired': No free period or no info, should delete
+    '''
     logger.debug('task=%s, path=%s, tid=%s', task, path, tid)
 
     file = os.path.join(path, f'{tid}.info')
     if not os.path.exists(file):
-        logger.debug('action=pass, reason=!info')
-        return True
+        logger.debug('action=expired, reason=!info')
+        return 'expired'
 
     info = None
     with open(file, 'r') as fp:
         info = json.load(fp)
 
     if info is None:
-        logger.debug('action=delete, reason=!info')
-        return False
+        logger.debug('action=expired, reason=!info')
+        return 'expired'
 
     if info['status']['discountEndTime'] is None:
-        logger.debug('action=delete, reason=!endtime')
-        return False
+        logger.debug('action=expired, reason=!endtime')
+        return 'expired'
 
     end = datetime.strptime(
         info['status']['discountEndTime'],
@@ -87,17 +94,23 @@ def free(task: str, path: str, tid: str) -> bool:
     )
     now = datetime.now()
 
-    if end - now < timedelta(minutes=5):
+    if now > end:
+        # Free period has already ended
         logger.debug(
-            'end=%s, action=delete, reason=!free',
+            'end=%s, action=expired, reason=free_over',
             info['status']['discountEndTime']
         )
-        clean(path=path, tid=tid)
-        return False
+        return 'expired'
+    elif end - now < timedelta(minutes=5):
+        # Free period ending soon
+        logger.debug(
+            'end=%s, action=ending, reason=free_ending',
+            info['status']['discountEndTime']
+        )
+        return 'ending'
     else:
-        logger.debug('action=pass, reason=free')
-
-    return True
+        logger.debug('action=free, reason=free')
+        return 'free'
 
 def main():
     parser = argparse.ArgumentParser(
@@ -158,6 +171,7 @@ def main():
             setattr(args, key, config[key])
 
     delete_tasks = []
+    pause_tasks = []
     resume_tasks = []
 
     # Current time
@@ -198,7 +212,10 @@ def main():
                     )
                     delete_tasks.append({'id': task, 'tid': tid, 'title': title})
 
-                if not free(task=task, path=args.path, tid=tid):
+                free_status = check_free_status(task=task, path=args.path, tid=tid)
+                if free_status == 'ending':
+                    pause_tasks.append({'id': task, 'tid': tid, 'title': title})
+                elif free_status == 'expired':
                     delete_tasks.append({'id': task, 'tid': tid, 'title': title})
 
             if status == 'waiting':
@@ -207,7 +224,10 @@ def main():
                     logger.debug('action=pass, reason=completed')
                     continue
 
-                if not free(task=task, path=args.path, tid=tid):
+                free_status = check_free_status(task=task, path=args.path, tid=tid)
+                if free_status == 'ending':
+                    pause_tasks.append({'id': task, 'tid': tid, 'title': title})
+                elif free_status == 'expired':
                     delete_tasks.append({'id': task, 'tid': tid, 'title': title})
 
             if status == 'error':
@@ -229,6 +249,11 @@ def main():
                 for t in delete_tasks:
                     logger.info('  %s: %s', t['id'], t['title'])
 
+            if len(pause_tasks) > 0:
+                logger.info('Tasks to pause:')
+                for t in pause_tasks:
+                    logger.info('  %s: %s', t['id'], t['title'])
+
             if len(resume_tasks) > 0:
                 logger.info('Tasks to resume:')
                 for t in resume_tasks:
@@ -240,6 +265,12 @@ def main():
                 # Clean up local files for deleted tasks
                 for t in delete_tasks:
                     clean(path=args.path, tid=t['tid'])
+
+            if len(pause_tasks) > 0:
+                syno.ds.task.pause(tasks=[t['id'] for t in pause_tasks])
+                # NOTE: We do NOT clean up .info files for paused tasks.
+                # When the user resumes manually, check.py will detect
+                # the expired free period and handle appropriately.
 
             if len(resume_tasks) > 0:
                 syno.ds.task.resume(tasks=[t['id'] for t in resume_tasks])
