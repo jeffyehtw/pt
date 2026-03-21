@@ -21,6 +21,15 @@ formatter = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
+# Set up file handler for persistent logging
+file_handler = logging.FileHandler(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'app.log'
+))
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
 # Set up stream handler for console output
 stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setLevel(logging.INFO)
@@ -183,6 +192,7 @@ def main():
     # Apply log level
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logger.setLevel(log_level)
+    file_handler.setLevel(log_level)
     stream_handler.setLevel(log_level)
 
     # Load configuration files
