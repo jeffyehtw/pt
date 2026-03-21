@@ -106,6 +106,36 @@ The tools look for JSON configuration files in the root directory.
 
 ---
 
+## ⏰ Cron Setup (Scheduling)
+
+To run these tools automatically, set up cron jobs on your Synology NAS or a always-on machine.
+
+### Recommended Cron Schedule
+
+```cron
+# Check and manage downloads every 5 minutes
+*/5 * * * * /path/to/pt/check.py --path /volume1/Torrent/info >> /var/log/pt-check.log 2>&1
+
+# Clean up metadata every hour
+0 * * * * /path/to/pt/clean.py --output /volume1/Torrent/info >> /var/log/pt-clean.log 2>&1
+
+# Search for free torrents every 30 minutes (adjust as needed)
+*/30 * * * * /path/to/pt/search.py --mode movie --free --output /volume1/Torrent/watch >> /var/log/pt-search.log 2>&1
+```
+
+### Synology Cron Setup
+
+1.  **Via SSH:** Edit the crontab with `crontab -e`.
+2.  **Via Synology GUI:** Control Panel > Task Scheduler > User-defined scripts.
+
+### Notes
+
+*   Ensure `synology.json` and `mt.json` are in the project root (or pass config via arguments).
+*   Use `--dry-run` first to verify behavior before running unattended.
+*   Redirect output to log files for debugging.
+
+---
+
 ## 📦 Submodules
 
 ### [mt](mt/README.md)
