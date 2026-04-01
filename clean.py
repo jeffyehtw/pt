@@ -7,42 +7,14 @@ import json
 import shutil
 import argparse
 import glob
-import logging
 
 from syno.api import Syno
+from utils import setup_logger, load_config, merge_args_with_config
 
 __description__ = 'Clean up orphaned torrent metadata files'
 __epilog__ = 'Report bugs to <yehcj.tw@gmail.com>'
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-formatter = logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-# Set up file handler for persistent logging
-file_handler = logging.FileHandler(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'app.log'
-))
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-
-# Set up stream handler for console output
-stream_handler = logging.StreamHandler(sys.stdout)
-stream_handler.setLevel(logging.INFO)
-stream_handler.setFormatter(formatter)
-logger.addHandler(stream_handler)
-
-def load(file: str) -> dict:
-    '''Load configuration from a JSON file'''
-    if not os.path.exists(file):
-        return None
-
-    with open(file, 'r') as fp:
-        return json.load(fp)
+logger = None
 
 def get_active_tids(ip: str, port: str, account: str, password: str) -> set:
     '''Retrieve active task IDs from Synology NAS'''
@@ -141,6 +113,8 @@ def clean_orphaned_info(args, active_tids):
 
 def main():
     '''Entry point: parse arguments and execute cleanup'''
+    global logger
+
     parser = argparse.ArgumentParser(
         description=__description__,
         epilog=__epilog__
@@ -189,30 +163,20 @@ def main():
     )
     args = parser.parse_args(sys.argv[1:])
 
-    # Apply log level
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logger.setLevel(log_level)
-    file_handler.setLevel(log_level)
-    stream_handler.setLevel(log_level)
+    # Setup logger
+    logger = setup_logger(
+        log_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.log'),
+        verbose=args.verbose
+    )
 
     # Load configuration files
     base = os.path.dirname(os.path.realpath(__file__))
-    mt_config = load(os.path.join(base, 'mt.json'))
-    syno_config = load(os.path.join(base, 'synology.json'))
+    mt_config = load_config(os.path.join(base, 'mt.json'))
+    syno_config = load_config(os.path.join(base, 'synology.json'))
 
     # Merge configurations
-    if args.output is None and mt_config:
-        args.output = mt_config.get('output')
-
-    if syno_config:
-        if args.ip is None:
-            args.ip = syno_config.get('ip')
-        if args.port is None:
-            args.port = syno_config.get('port', '5000')
-        if args.account is None:
-            args.account = syno_config.get('account')
-        if args.password is None:
-            args.password = syno_config.get('password')
+    args = merge_args_with_config(args, mt_config)
+    args = merge_args_with_config(args, syno_config)
 
     logger.info('Starting cleanup in %s', args.output)
 

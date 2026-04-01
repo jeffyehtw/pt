@@ -20,6 +20,7 @@ pt/
 ├── search.py       # M-Team interactive search & download
 ├── download.py     # Direct M-Team download by Torrent ID
 ├── delete.py       # General-purpose file/directory cleanup
+├── utils.py        # Shared utilities for logging and configuration
 ├── mt/             # Submodule: M-Team API Wrapper
 └── syno/           # Submodule: Synology API Wrapper
 ```
@@ -154,5 +155,5 @@ Python client for the Synology Download Station API. Handles task listing, resum
 
 Install dependencies via pip:
 ```bash
-pip install requests xmltodict
+pip install -r requirements.txt
 ```

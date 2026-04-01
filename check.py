@@ -3,50 +3,18 @@ Script to check and manage Synology Download Station tasks.
 '''
 import os
 import sys
-import logging
 import argparse
 import json
 
 from datetime import datetime, timedelta
 
 from syno.api import Syno
+from utils import setup_logger, load_config, merge_args_with_config
 
 __description__ = 'Synology Download Station Task Manager'
 __epilog__ = 'Report bugs to <yehcj.tw@gmail.com>'
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-
-formatter = logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-file_handler = logging.FileHandler(os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'check.log'
-))
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(formatter)
-
-stream_handler = logging.StreamHandler(sys.stdout)
-stream_handler.setLevel(logging.DEBUG)
-stream_handler.setFormatter(formatter)
-
-logger.addHandler(file_handler)
-logger.addHandler(stream_handler)
-
-def load(file: str) -> dict:
-    '''Load configuration from JSON file'''
-    logger.debug('file=%s', file)
-
-    if not os.path.exists(file):
-        return None
-
-    config = {}
-    with open(file, 'r') as fp:
-        config = json.load(fp)
-
-    return config
+logger = None
 
 def clean(path: str, tid: str) -> None:
     '''Clean up local torrent information files'''
@@ -113,6 +81,8 @@ def check_free_status(task: str, path: str, tid: str) -> str:
         return 'free'
 
 def main():
+    global logger
+
     parser = argparse.ArgumentParser(
         description=__description__,
         epilog=__epilog__
@@ -159,16 +129,20 @@ def main():
     )
     args = parser.parse_args(sys.argv[1:])
 
+    # Setup logger
+    logger = setup_logger(
+        log_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'check.log'),
+        verbose=args.verbose
+    )
+
     # load configuration file
-    config = load(os.path.join(
+    config = load_config(os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
         'synology.json'
     ))
 
-    # overwrite the configuration if a parameter is provided
-    for key, value in vars(args).items():
-        if value is None and key in config:
-            setattr(args, key, config[key])
+    # Merge configuration with CLI arguments
+    args = merge_args_with_config(args, config)
 
     delete_tasks = []
     pause_tasks = []
