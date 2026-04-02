@@ -4,10 +4,11 @@ Script to search and download torrents from M-Team
 import os
 import sys
 import json
+import logging
 import argparse
 
 from mt.api import MT
-from utils import setup_logger, load_config, merge_args_with_config
+from syno.api import Syno
 
 __description__ = 'Search and download torrents from M-Team'
 __epilog__ = 'Report bugs to <yehcj.tw@gmail.com>'
@@ -22,11 +23,39 @@ __choices__ = {
     'rankings'
 }
 
-logger = None
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+file_handler = logging.FileHandler(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'app.log'
+))
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(formatter)
+
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(formatter)
+
+logger.addHandler(file_handler)
+logger.addHandler(stream_handler)
+
+def load(file: str) -> dict:
+    '''Load configuration from a JSON file'''
+    if not os.path.exists(file):
+        return None
+    with open(file, 'r') as fp:
+        return json.load(fp)
+
 
 def main():
     '''Entry point: parse arguments'''
-    global logger
+    global file_handler
+    global stream_handler
 
     parser = argparse.ArgumentParser(
         description=__description__,
@@ -88,22 +117,31 @@ def main():
     )
     args = parser.parse_args(sys.argv[1:])
 
-    # Setup logger
-    logger = setup_logger(
-        log_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.log'),
-        verbose=args.verbose
-    )
+    # Apply log level to all handlers
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logger.setLevel(log_level)
+    file_handler.setLevel(log_level)
+    stream_handler.setLevel(log_level)
 
     logger.info('args=%s', args)
 
     # Load configuration from mt.json
-    config = load_config(os.path.join(
+    config = load(os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
         'mt.json'
     ))
 
-    # Merge configuration with CLI arguments
-    args = merge_args_with_config(args, config)
+    # Load Synology configuration
+    synology_config = load(os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        'synology.json'
+    ))
+
+    # Fall back to config values if not provided on the command line
+    if args.key is None and config:
+        args.key = config.get('key')
+    if args.output is None and config:
+        args.output = config.get('output')
 
     with MT(key=args.key, output=args.output) as mt:
         items = mt.search(
@@ -143,7 +181,22 @@ def main():
                 logger.info('action=skip, reason=!free')
                 continue
 
-            mt.download(tid=tid, detail=detail)
+            torrent_path, torrent_url = mt.download(tid=tid, detail=detail)
+
+            # Create Synology task if configured
+            if torrent_url and synology_config:
+                destination = mt.download.resolve_destination(detail)
+                with Syno(
+                    ip=synology_config['ip'],
+                    port=synology_config['port'],
+                    account=synology_config['account'],
+                    password=synology_config['password']
+                ) as syno:
+                    success = syno.ds.task.create(uri=torrent_url, destination=destination)
+                    if success:
+                        logger.info('action=syno_create, tid=%s, destination=%s', tid, destination)
+                    else:
+                        logger.error('action=syno_create_fail, tid=%s', tid)
 
 if __name__ == '__main__':
     main()

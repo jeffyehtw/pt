@@ -7,14 +7,33 @@ import json
 import shutil
 import argparse
 import glob
+import logging
 
 from syno.api import Syno
-from utils import setup_logger, load_config, merge_args_with_config
 
 __description__ = 'Clean up orphaned torrent metadata files'
 __epilog__ = 'Report bugs to <yehcj.tw@gmail.com>'
 
-logger = None
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Set up stream handler for console output
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
+
+def load(file: str) -> dict:
+    '''Load configuration from a JSON file'''
+    if not os.path.exists(file):
+        return None
+
+    with open(file, 'r') as fp:
+        return json.load(fp)
 
 def get_active_tids(ip: str, port: str, account: str, password: str) -> set:
     '''Retrieve active task IDs from Synology NAS'''
@@ -88,6 +107,39 @@ def process_loaded_files(args):
 
     return removed_count
 
+def clean_finished_torrents(args):
+    '''Remove .torrent files that are already in history list'''
+    list_json_path = os.path.join(args.output, 'list.json')
+    if not os.path.exists(list_json_path):
+        return 0
+
+    history = []
+    try:
+        with open(list_json_path, 'r') as fp:
+            history = json.load(fp)
+    except Exception as e:
+        logger.error('Failed to load history list: %s', e)
+        return 0
+
+    torrent_files = glob.glob(os.path.join(args.output, '*.torrent'))
+    removed_count = 0
+
+    for torrent_file in torrent_files:
+        tid = os.path.basename(torrent_file).replace('.torrent', '')
+        if tid in history:
+            if args.dry_run:
+                logger.info('[Dry Run] Would remove already recorded .torrent: %s', torrent_file)
+                removed_count += 1
+            else:
+                try:
+                    os.remove(torrent_file)
+                    logger.info('Removed already recorded .torrent: %s', torrent_file)
+                    removed_count += 1
+                except Exception as e:
+                    logger.error('Failed to remove %s: %s', torrent_file, e)
+    
+    return removed_count
+
 def clean_orphaned_info(args, active_tids):
     '''Remove .info files not present in active_tids'''
     info_files = glob.glob(os.path.join(args.output, '*.info'))
@@ -113,8 +165,6 @@ def clean_orphaned_info(args, active_tids):
 
 def main():
     '''Entry point: parse arguments and execute cleanup'''
-    global logger
-
     parser = argparse.ArgumentParser(
         description=__description__,
         epilog=__epilog__
@@ -163,27 +213,46 @@ def main():
     )
     args = parser.parse_args(sys.argv[1:])
 
-    # Setup logger
-    logger = setup_logger(
-        log_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app.log'),
-        verbose=args.verbose
-    )
+    # Apply log level
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logger.setLevel(log_level)
+    stream_handler.setLevel(log_level)
 
     # Load configuration files
     base = os.path.dirname(os.path.realpath(__file__))
-    mt_config = load_config(os.path.join(base, 'mt.json'))
-    syno_config = load_config(os.path.join(base, 'synology.json'))
+    
+    # Try loading from root first, then config/ directory
+    mt_config = load(os.path.join(base, 'mt.json'))
+    if mt_config is None:
+        mt_config = load(os.path.join(base, 'config', 'mt.json'))
+
+    syno_config = load(os.path.join(base, 'synology.json'))
+    if syno_config is None:
+        syno_config = load(os.path.join(base, 'config', 'synology.json'))
 
     # Merge configurations
-    args = merge_args_with_config(args, mt_config)
-    args = merge_args_with_config(args, syno_config)
+    if args.output is None and mt_config:
+        args.output = mt_config.get('output')
+
+    if syno_config:
+        if args.ip is None:
+            args.ip = syno_config.get('ip')
+        if args.port is None:
+            args.port = syno_config.get('port', '5000')
+        if args.account is None:
+            args.account = syno_config.get('account')
+        if args.password is None:
+            args.password = syno_config.get('password')
 
     logger.info('Starting cleanup in %s', args.output)
 
     # Step 1: Process .loaded files and update history
     process_loaded_files(args)
 
-    # Step 2: Get active tasks from Synology
+    # Step 2: Clean up already recorded .torrent files
+    clean_finished_torrents(args)
+
+    # Step 3: Get active tasks from Synology
     active_tids = get_active_tids(
         ip=args.ip,
         port=args.port,
@@ -191,7 +260,7 @@ def main():
         password=args.password
     )
 
-    # Step 3: Clean up orphaned .info files
+    # Step 4: Clean up orphaned .info files
     if active_tids:
         clean_orphaned_info(args, active_tids)
     else:

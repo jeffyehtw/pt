@@ -72,6 +72,17 @@ def main():
     # Merge configuration with CLI arguments
     args = merge_args_with_config(args, config)
 
+    # Load Synology configuration
+    synology_config = load(os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        'config', 'synology.json'
+    ))
+    if synology_config is None:
+        synology_config = load(os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            'synology.json'
+        ))
+
     with MT(key=args.key, output=args.output) as mt:
         for tid in args.id:
             logger.info('tid=%s', tid)
@@ -81,18 +92,35 @@ def main():
                 logger.info('action=skip, reason=exist')
                 continue
 
-            # Fetch detailed metadata if --verbose is requested
-            detail = None
-            if args.verbose:
-                detail = mt.detail(tid=tid)
-                if detail is not None:
-                    logger.info(
-                        'name=%s, status=%s',
-                        detail['name'],
-                        detail['status']['discount']
-                    )
+            # Fetch detailed metadata
+            detail = mt.detail(tid=tid)
+            if detail is None:
+                logger.info('action=skip, reason=!detail')
+                continue
 
-            mt.download(tid=tid, detail=detail)
+            if args.verbose:
+                logger.info(
+                    'name=%s, status=%s',
+                    detail['name'],
+                    detail['status']['discount']
+                )
+
+            torrent_path, torrent_url = mt.download(tid=tid, detail=detail)
+
+            # Create Synology task if configured
+            if torrent_url and synology_config:
+                destination = mt.download.resolve_destination(detail)
+                with Syno(
+                    ip=synology_config['ip'],
+                    port=synology_config['port'],
+                    account=synology_config['account'],
+                    password=synology_config['password']
+                ) as syno:
+                    success = syno.ds.task.create(uri=torrent_url, destination=destination)
+                    if success:
+                        logger.info('action=syno_create, tid=%s, destination=%s', tid, destination)
+                    else:
+                        logger.error('action=syno_create_fail, tid=%s', tid)
 
 if __name__ == '__main__':
     main()

@@ -3,18 +3,50 @@ Script to check and manage Synology Download Station tasks.
 '''
 import os
 import sys
+import logging
 import argparse
 import json
 
 from datetime import datetime, timedelta
 
 from syno.api import Syno
-from utils import setup_logger, load_config, merge_args_with_config
 
 __description__ = 'Synology Download Station Task Manager'
 __epilog__ = 'Report bugs to <yehcj.tw@gmail.com>'
 
-logger = None
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+file_handler = logging.FileHandler(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'check.log'
+))
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setLevel(logging.DEBUG)
+stream_handler.setFormatter(formatter)
+
+logger.addHandler(file_handler)
+logger.addHandler(stream_handler)
+
+def load(file: str) -> dict:
+    '''Load configuration from JSON file'''
+    logger.debug('file=%s', file)
+
+    if not os.path.exists(file):
+        return None
+
+    config = {}
+    with open(file, 'r') as fp:
+        config = json.load(fp)
+
+    return config
 
 def clean(path: str, tid: str) -> None:
     '''Clean up local torrent information files'''
@@ -28,33 +60,39 @@ def clean(path: str, tid: str) -> None:
     if os.path.exists(loaded):
         os.remove(loaded)
 
-def check_free_status(task: str, path: str, tid: str) -> str:
-    '''
-    Check if a task is free to download.
-    
-    Returns:
-        'free': Task is in free download period
-        'ending': Free period ending soon (< 5 min), should pause
-        'expired': No free period or no info, should delete
-    '''
-    logger.debug('task=%s, path=%s, tid=%s', task, path, tid)
+def is_in_skip_period(skip_periods: list) -> tuple:
+    '''Check if current time falls within any skip period'''
+    now = datetime.now()
+    for period in skip_periods:
+        try:
+            start = datetime.strptime(period['start'], '%Y%m%d %H:%M:%S')
+            end = datetime.strptime(period['end'], '%Y%m%d %H:%M:%S')
+            if start <= now <= end:
+                return True, period
+        except (ValueError, KeyError) as e:
+            logger.error('Error parsing skip period: %s', e)
+    return False, None
 
+def free(task: str, path: str, tid: str) -> bool:
+    '''Check if a task is free'''
+    logger.debug('task=%s, path=%s, tid=%s', task, path, tid)
+    
     file = os.path.join(path, f'{tid}.info')
     if not os.path.exists(file):
-        logger.debug('action=expired, reason=!info')
-        return 'expired'
+        logger.debug('action=pass, reason=!info')
+        return True
 
     info = None
     with open(file, 'r') as fp:
         info = json.load(fp)
 
     if info is None:
-        logger.debug('action=expired, reason=!info')
-        return 'expired'
+        logger.debug('action=delete, reason=!info')
+        return False
 
     if info['status']['discountEndTime'] is None:
-        logger.debug('action=expired, reason=!endtime')
-        return 'expired'
+        logger.debug('action=delete, reason=!endtime')
+        return False
 
     end = datetime.strptime(
         info['status']['discountEndTime'],
@@ -62,27 +100,19 @@ def check_free_status(task: str, path: str, tid: str) -> str:
     )
     now = datetime.now()
 
-    if now > end:
-        # Free period has already ended
+    if end - now < timedelta(minutes=5):
         logger.debug(
-            'end=%s, action=expired, reason=free_over',
+            'end=%s, action=delete, reason=!free',
             info['status']['discountEndTime']
         )
-        return 'expired'
-    elif end - now < timedelta(minutes=5):
-        # Free period ending soon
-        logger.debug(
-            'end=%s, action=ending, reason=free_ending',
-            info['status']['discountEndTime']
-        )
-        return 'ending'
+        clean(path=path, tid=tid)
+        return False
     else:
-        logger.debug('action=free, reason=free')
-        return 'free'
+        logger.debug('action=pass, reason=free')
+
+    return True
 
 def main():
-    global logger
-
     parser = argparse.ArgumentParser(
         description=__description__,
         epilog=__epilog__
@@ -129,23 +159,38 @@ def main():
     )
     args = parser.parse_args(sys.argv[1:])
 
-    # Setup logger
-    logger = setup_logger(
-        log_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'check.log'),
-        verbose=args.verbose
-    )
+    # Load settings
+    settings = load(os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        'config', 'settings.json'
+    )) or {}
+
+    # Check for skip periods
+    skip_periods = settings.get('skip_check_periods', [])
+    in_skip, period = is_in_skip_period(skip_periods)
+    if in_skip:
+        logger.info('Current time falls within skip period: %s to %s. Exiting.', period['start'], period['end'])
+        return
+
+    seeding_days_limit = settings.get('seeding_days_limit', 7)
 
     # load configuration file
-    config = load_config(os.path.join(
+    config = load(os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
-        'synology.json'
+        'config', 'synology.json'
     ))
+    if config is None:
+        config = load(os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            'synology.json'
+        )) or {}
 
-    # Merge configuration with CLI arguments
-    args = merge_args_with_config(args, config)
+    # overwrite the configuration if a parameter is provided
+    for key, value in vars(args).items():
+        if value is None and key in config:
+            setattr(args, key, config[key])
 
     delete_tasks = []
-    pause_tasks = []
     resume_tasks = []
 
     # Current time
@@ -186,10 +231,7 @@ def main():
                     )
                     delete_tasks.append({'id': task, 'tid': tid, 'title': title})
 
-                free_status = check_free_status(task=task, path=args.path, tid=tid)
-                if free_status == 'ending':
-                    pause_tasks.append({'id': task, 'tid': tid, 'title': title})
-                elif free_status == 'expired':
+                if not free(task=task, path=args.path, tid=tid):
                     delete_tasks.append({'id': task, 'tid': tid, 'title': title})
 
             if status == 'waiting':
@@ -198,21 +240,19 @@ def main():
                     logger.debug('action=pass, reason=completed')
                     continue
 
-                free_status = check_free_status(task=task, path=args.path, tid=tid)
-                if free_status == 'ending':
-                    pause_tasks.append({'id': task, 'tid': tid, 'title': title})
-                elif free_status == 'expired':
+                if not free(task=task, path=args.path, tid=tid):
                     delete_tasks.append({'id': task, 'tid': tid, 'title': title})
 
             if status == 'error':
                 resume_tasks.append({'id': task, 'tid': tid, 'title': title})
 
             if status == 'seeding':
-                # Check for seeding over 7 days
+                # Check for seeding limit
                 completed_time = detail['completed_time']
-                if completed_time > 0 and (now_ts - completed_time) > (7 * 86400):
+                if completed_time > 0 and (now_ts - completed_time) > (seeding_days_limit * 86400):
                     logger.debug(
-                        'action=delete, reason=seeding_over_7_days, duration=%ds',
+                        'action=delete, reason=seeding_over_%d_days, duration=%ds',
+                        seeding_days_limit,
                         now_ts - completed_time
                     )
                     delete_tasks.append({'id': task, 'tid': tid, 'title': title})
@@ -221,11 +261,6 @@ def main():
             if len(delete_tasks) > 0:
                 logger.info('Tasks to delete:')
                 for t in delete_tasks:
-                    logger.info('  %s: %s', t['id'], t['title'])
-
-            if len(pause_tasks) > 0:
-                logger.info('Tasks to pause:')
-                for t in pause_tasks:
                     logger.info('  %s: %s', t['id'], t['title'])
 
             if len(resume_tasks) > 0:
@@ -239,12 +274,6 @@ def main():
                 # Clean up local files for deleted tasks
                 for t in delete_tasks:
                     clean(path=args.path, tid=t['tid'])
-
-            if len(pause_tasks) > 0:
-                syno.ds.task.pause(tasks=[t['id'] for t in pause_tasks])
-                # NOTE: We do NOT clean up .info files for paused tasks.
-                # When the user resumes manually, check.py will detect
-                # the expired free period and handle appropriately.
 
             if len(resume_tasks) > 0:
                 syno.ds.task.resume(tasks=[t['id'] for t in resume_tasks])
