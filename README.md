@@ -20,7 +20,7 @@ pt/
 ├── config/         # Centralized configuration directory
 │   ├── settings.json   # Global behavioral settings (seeding, categories, skip periods)
 │   ├── mt.json         # M-Team API credentials
-│   └── synology.json   # Synology NAS credentials
+│   └── syno.json       # Synology NAS credentials
 ├── check.py        # Synology task lifecycle manager & "Free Period" monitor
 ├── clean.py        # Metadata & unused torrent cleanup utility
 ├── search.py       # M-Team interactive search & categorized download
@@ -63,7 +63,7 @@ Downloads specific torrents by ID and creates categorized Synology tasks.
 
 ## ⚙️ Configuration
 
-Settings are now centralized in the `config/` directory.
+Settings are now centralized in the `config/` directory. The tools prioritize files in `config/` but will fall back to root-level files if they exist.
 
 ### `config/settings.json`
 ```json
@@ -85,7 +85,7 @@ Settings are now centralized in the `config/` directory.
 }
 ```
 
-### `config/synology.json`
+### `config/syno.json`
 ```json
 {
     "ip": "10.0.x.x",
