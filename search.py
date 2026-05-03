@@ -134,8 +134,13 @@ def main():
     # Load Synology configuration
     synology_config = load(os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
-        'synology.json'
+        'config', 'syno.json'
     ))
+    if synology_config is None:
+        synology_config = load(os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            'syno.json'
+        ))
 
     # Fall back to config values if not provided on the command line
     if args.key is None and config:

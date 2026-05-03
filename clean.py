@@ -226,9 +226,9 @@ def main():
     if mt_config is None:
         mt_config = load(os.path.join(base, 'config', 'mt.json'))
 
-    syno_config = load(os.path.join(base, 'synology.json'))
+    syno_config = load(os.path.join(base, 'syno.json'))
     if syno_config is None:
-        syno_config = load(os.path.join(base, 'config', 'synology.json'))
+        syno_config = load(os.path.join(base, 'config', 'syno.json'))
 
     # Merge configurations
     if args.output is None and mt_config:

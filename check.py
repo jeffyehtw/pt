@@ -177,12 +177,12 @@ def main():
     # load configuration file
     config = load(os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
-        'config', 'synology.json'
+        'config', 'syno.json'
     ))
     if config is None:
         config = load(os.path.join(
             os.path.dirname(os.path.realpath(__file__)),
-            'synology.json'
+            'syno.json'
         )) or {}
 
     # overwrite the configuration if a parameter is provided
