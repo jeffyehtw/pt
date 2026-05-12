@@ -7,9 +7,10 @@ A comprehensive suite of management tools for **Synology Download Station** and 
 *   **Synology Task Automation**: Automatically clean up stuck downloads, manage seeding time limits, and resume errored tasks.
 *   **M-Team Integration**: Search for torrents based on categories, filter for "Free Leech" status, and download directly.
 *   **Automatic Categorization**: Torrents are automatically routed to specific Synology subdirectories (e.g., Movie, TV, Music) based on M-Team metadata.
-*   **Free Period Protection**: Skip scheduled checks during specific "free time" periods to optimize processing.
+*   **Targeted Checks**: Optimized existence checks that only scan specific category folders, reducing disk I/O.
+*   **Free Period Protection**: Skip scheduled "Free Leech" expiry checks during specific periods while maintaining other tasks.
 *   **Smart Cleanup**: Automatically removes used `.torrent` files and orphaned metadata to keep your directories tidy.
-*   **Submodule-based Architecture**: Core logic is encapsulated in clean, reusable submodules for M-Team (`mt/`) and Synology (`syno/`).
+*   **Progress-Based Stalling**: Detects dead downloads by tracking actual data progress over time, regardless of speed.
 
 ---
 
@@ -17,15 +18,18 @@ A comprehensive suite of management tools for **Synology Download Station** and 
 
 ```text
 pt/
-├── config/         # Centralized configuration directory
-│   ├── settings.json   # Global behavioral settings (seeding, categories, skip periods)
-│   ├── mt.json         # M-Team API credentials
-│   └── syno.json       # Synology NAS credentials
-├── check.py        # Synology task lifecycle manager & "Free Period" monitor
-├── clean.py        # Metadata & unused torrent cleanup utility
+├── config/         # Centralized configuration and state
+│   ├── path.json       # Category-specific local and NAS paths
+│   ├── mt.json         # M-Team API credentials and skip periods
+│   ├── syno.json       # Synology NAS credentials and limits
+│   ├── list.json       # Persistence: Download history
+│   └── last_status.json # State: Task progress tracking
+├── manage.py       # Synology task lifecycle manager & maintenance
+├── cleanup.py      # Metadata & unused torrent cleanup utility
 ├── search.py       # M-Team interactive search & categorized download
 ├── download.py     # Direct M-Team download & categorized task creation
-├── delete.py       # General-purpose file/directory cleanup utility
+├── purge.py        # Advanced manual file/directory purge utility
+├── finder.py       # Standardized debug utility to locate NAS tasks
 ├── mt/             # Submodule: M-Team API Wrapper
 └── syno/           # Submodule: Synology API Wrapper
 ```
@@ -34,72 +38,84 @@ pt/
 
 ## 🛠️ Tool Documentation
 
-### 1. `check.py` (Synology Manager)
-Manages active tasks on your Synology NAS.
+### 1. `manage.py` (The Maintainer)
+The core automation engine, typically run via cron.
 
-*   **Free Period Check**: Exits immediately if the current time is within a defined "skip period" in `settings.json`.
-*   **Stuck Downloads**: Deletes tasks downloading for >1 hour with 0 speed.
-*   **Dynamic Seeding Limits**: Removes tasks seeding beyond the limit defined in `settings.json` (default 7 days).
-*   **Free Leech Protection**: Monitors "Free Leech" expiry and removes tasks 5 minutes before they become paid.
-*   **Auto-Resume**: Automatically resumes tasks in an `error` state.
+*   **Continuous Maintenance**: Always performs stuck-task cleanup and auto-resumes, even during skip periods.
+*   **Unified Stalled Detection**: Monitors `downloaded_pieces` over time. If progress stops for >1 hour (configurable), the task is deleted.
+*   **Free Leech Protection**: Bypasses the M-Team "Free" expiry check only if the current time is within a `skip_check_period` in `mt.json`.
+*   **Dynamic Seeding Limits**: Enforces seeding limits defined in `syno.json`.
 
-### 2. `clean.py` (Metadatable & Torrent Sync)
-Synchronizes local files with the state of the NAS.
+### 2. `cleanup.py` (The Janitor)
+Synchronizes your local filesystem with the state of the NAS.
 
-1.  **Used Torrents**: Removes `.torrent` files from the watch directory that have already been recorded in `list.json`.
-2.  **Metadata Sync**: Processes `.loaded` markers and updates history.
-3.  **Orphaned Info**: Removes `.info` files whose tasks are no longer on the NAS.
+1.  **History Update**: Processes `.loaded` markers to update the central `list.json`.
+2.  **Torrent Cleanup**: Removes raw `.torrent` files that have already been recorded as successful.
+3.  **Orphaned Info**: Removes `.info` metadata files for tasks that no longer exist on the NAS.
 
-### 3. `search.py` (Categorized Search)
-Searches M-Team and automatically creates categorized tasks on Synology.
+### 3. `search.py` (The Seeker)
+Interactive tool to search M-Team and create categorized Synology tasks.
 
-*   **Categorization**: Matches M-Team category to paths defined in `settings.json` (e.g., `home/Download/Movie`).
-*   **URI-based Creation**: Uses M-Team download URLs directly to create tasks, ensuring maximum compatibility.
+*   **Efficiency**: Resolves category first to perform a targeted check on disk before downloading.
+*   **URI Creation**: Uses M-Team download tokens for maximum compatibility.
 
-### 4. `download.py` (Direct Download)
-Downloads specific torrents by ID and creates categorized Synology tasks.
+### 4. `download.py` (The Direct Adder)
+Downloads specific torrents by ID and creates categorized Synology tasks. Supports retries and file validation.
+
+### 5. `purge.py` (The Purger)
+A powerful manual cleanup tool with advanced filtering.
+
+*   **Filters**: Support for `--older-than` (days), `--ext` (extension), and `--keyword`.
+*   **Safety**: Includes `--trash` (move to `.trash` folder) and mandatory interactive confirmation.
+*   **Recursion**: Supports deep cleaning via the `--recursive` flag.
+
+### 6. `finder.py` (The Finder)
+A standardized utility to quickly locate specific Task IDs on your NAS using a title keyword.
 
 ---
 
 ## ⚙️ Configuration
 
-Settings are now centralized in the `config/` directory. The tools prioritize files in `config/` but will fall back to root-level files if they exist.
+All configuration is located in the `config/` directory. Example files (`*.json.example`) are provided in the same folder.
 
-### `config/settings.json`
+### `config/path.json`
+Defines the mapping between categories and physical paths.
 ```json
 {
-    "seeding_days_limit": 7,
-    "skip_check_periods": [
-        {
-            "start": "20260503 00:00:00",
-            "end": "20260505 23:59:59"
-        }
-    ],
-    "category_paths": {
+    "torrent": {
+        "Movie": "/mnt/storage/Torrent/Movie",
+        "Watch": "/mnt/storage/Torrent/Watch"
+    },
+    "file": {
         "Movie": "home/Download/Movie",
-        "TV": "home/Download/TV",
-        "Music": "home/Download/Music",
-        "Adult": "home/Download/Adult",
-        "Other": "home/Download"
+        "Watch": "home/Download"
     }
 }
 ```
 
-### `config/syno.json`
+### `config/mt.json`
+Contains tracker-specific settings and period-based rules.
 ```json
 {
-    "ip": "10.0.x.x",
-    "port": 5000,
-    "account": "your-username",
-    "password": "your-password"
+    "key": "your-api-key",
+    "rss": "your-rss-url",
+    "skip_check_periods": [
+        { "start": "20260511 00:00:00", "end": "20260512 23:59:59" }
+    ],
+    "category_map": { "401": "Movie", "Other": "Watch" }
 }
 ```
 
-### `config/mt.json`
+### `config/syno.json`
+Contains NAS credentials and operational limits.
 ```json
 {
-    "key": "your-m-team-api-key",
-    "output": "/path/to/local/torrent/backup"
+    "ip": "10.0.0.100",
+    "port": 5000,
+    "account": "nas_user",
+    "password": "nas_password",
+    "seeding_days_limit": 7,
+    "stalled_timeout": 3600
 }
 ```
 
@@ -107,11 +123,10 @@ Settings are now centralized in the `config/` directory. The tools prioritize fi
 
 ## 📦 Requirements
 
-*   Python 3.6+
+*   Python 3.10+
 *   `requests`
-*   `xmltodict`
 
 Install dependencies:
 ```bash
-pip install requests xmltodict
+pip install requests
 ```

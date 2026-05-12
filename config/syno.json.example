@@ -1,0 +1,8 @@
+{
+    "ip": null,
+    "port": 5000,
+    "account": null,
+    "password": null,
+    "seeding_days_limit": 7,
+    "stalled_timeout": 3600
+}

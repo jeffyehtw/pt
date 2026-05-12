@@ -1,0 +1,12 @@
+{
+    "torrent": {
+        "Movie": "/path/to/local/torrent/Movie",
+        "TV": "/path/to/local/torrent/TV",
+        "Watch": "/path/to/local/torrent/Watch"
+    },
+    "file": {
+        "Movie": "home/Download/Movie",
+        "TV": "home/Download/TV",
+        "Watch": "home/Download/Watch"
+    }
+}

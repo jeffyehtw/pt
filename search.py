@@ -9,9 +9,10 @@ import argparse
 
 from mt.api import MT
 from syno.api import Syno
+from utils import setup_logger, load_config, merge_args_with_config
 
 __description__ = 'Search and download torrents from M-Team'
-__epilog__ = 'Report bugs to <yehcj.tw@gmail.com>'
+__epilog__ = 'Search and acquisition completed.'
 __choices__ = {
     'normal',
     'adult',
@@ -44,15 +45,7 @@ stream_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 logger.addHandler(stream_handler)
 
-def load(file: str) -> dict:
-    '''Load configuration from a JSON file'''
-    if not os.path.exists(file):
-        return None
-    with open(file, 'r') as fp:
-        return json.load(fp)
-
-
-def main():
+def main() -> None:
     '''Entry point: parse arguments'''
     global file_handler
     global stream_handler
@@ -125,83 +118,147 @@ def main():
 
     logger.info('args=%s', args)
 
-    # Load configuration from mt.json
-    config = load(os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        'mt.json'
-    ))
+    # Load configurations
+    base = os.path.dirname(os.path.realpath(__file__))
+    config_dir = os.path.join(base, 'config')
 
-    # Load Synology configuration
-    synology_config = load(os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        'config', 'syno.json'
-    ))
-    if synology_config is None:
-        synology_config = load(os.path.join(
-            os.path.dirname(os.path.realpath(__file__)),
-            'syno.json'
-        ))
+    mt_config = load_config(os.path.join(config_dir, 'mt.json')) or {}
+    syno_config = load_config(os.path.join(config_dir, 'syno.json')) or {}
+    path_config = load_config(os.path.join(config_dir, 'path.json')) or {}
+    categories_map = mt_config.get('category_map', {})
 
-    # Fall back to config values if not provided on the command line
-    if args.key is None and config:
-        args.key = config.get('key')
-    if args.output is None and config:
-        args.output = config.get('output')
+    # Merge configuration with CLI arguments
+    args = merge_args_with_config(args, mt_config)
 
-    with MT(key=args.key, output=args.output) as mt:
-        items = mt.search(
-            mode=args.mode,
-            free=args.free,
-            index=args.index,
-            size=args.size,
-            keyword=args.keyword
-        )
-        if items is None:
-            return
+    # Load history list
+    history_file = os.path.join(config_dir, 'list.json')
+    history = []
+    if os.path.exists(history_file):
+        with open(history_file, 'r') as f:
+            history = json.load(f)
 
-        for item in items:
-            tid = item['id']
-            logger.info('tid=%s', tid)
+    with MT(key=args.key) as mt:
+        # Initialize Synology client if configured
+        syno_client = None
+        if syno_config:
+            syno_client = Syno(
+                ip=syno_config['ip'],
+                port=str(syno_config['port']),
+                account=syno_config['account'],
+                password=syno_config['password']
+            )
 
-            # Skip if already downloaded (unless --force is set)
-            if not args.force and mt.exist(tid=tid):
-                logger.info('action=skip, reason=exist')
-                continue
+        def process_items(syno: Syno = None) -> None:
+            from utils import resolve_category, get_category_paths, is_torrent_exist
 
-            # Fetch detailed metadata
-            detail = mt.detail(tid=tid)
-            if detail is None:
-                logger.info('action=skip, reason=!detail')
-                continue
+            items = mt.search(
+                mode=args.mode,
+                free=args.free,
+                index=args.index,
+                size=args.size,
+                keyword=args.keyword
+            )
+            if items is None:
+                return
 
-            if args.verbose:
-                logger.info(
-                    'name=%s, status=%s',
-                    detail['name'],
-                    detail['status']['discount']
+            for item in items:
+                tid = item['id']
+                logger.info('tid=%s', tid)
+
+                # Fetch detailed metadata early for path resolution
+                detail = mt.detail(tid=tid)
+                if detail is None:
+                    logger.info('action=skip, reason=!detail')
+                    continue
+
+                # Resolve category and paths
+                category = resolve_category(detail, categories_map)
+                local_dir, nas_dir = get_category_paths(category, path_config)
+
+                # Skip if already downloaded (unless --force is set)
+                # Use targeted local path for efficiency
+                search_dir = args.output or local_dir
+                if not args.force and is_torrent_exist(
+                    tid=tid,
+                    search_dir=search_dir,
+                    history=history
+                ):
+                    logger.info('action=skip, reason=exist')
+                    continue
+
+                if args.verbose:
+                    logger.info(
+                        'name=%s, status=%s',
+                        detail['name'],
+                        detail['status']['discount']
+                    )
+
+                # Check for free discount if --free is specified
+                if args.free and 'FREE' != detail['status']['discount']:
+                    logger.info('action=skip, reason=!free')
+                    continue
+
+                # If args.output is set, we use it as the base
+                # for local_dir if relative
+                if args.output and not os.path.isabs(local_dir):
+                    local_dir = os.path.join(args.output, local_dir)
+
+                torrent_path, torrent_url = mt.download(
+                    tid=tid,
+                    local_dir=local_dir,
+                    detail=detail
                 )
 
-            # Check for free discount if --free is specified
-            if args.free and 'FREE' != detail['status']['discount']:
-                logger.info('action=skip, reason=!free')
-                continue
+                # Create Synology task if configured
+                if torrent_path and syno:
+                    # Exclusively use FILE method for reliability
+                    # and destination control
+                    success = syno.ds.task.create(
+                        file=torrent_path,
+                        destination=nas_dir
+                    )
 
-            torrent_path, torrent_url = mt.download(tid=tid, detail=detail)
+                    # Fallback to default destination if the specific one fails
+                    if not success and nas_dir:
+                        logger.warning(
+                            'action=syno_create_retry, tid=%s, '
+                            'reason=fail_with_destination, destination=%s',
+                            tid,
+                            nas_dir
+                        )
+                        success = syno.ds.task.create(
+                            file=torrent_path,
+                            destination=None
+                        )
 
-            # Create Synology task if configured
-            if torrent_url and synology_config:
-                destination = mt.download.resolve_destination(detail)
-                with Syno(
-                    ip=synology_config['ip'],
-                    port=synology_config['port'],
-                    account=synology_config['account'],
-                    password=synology_config['password']
-                ) as syno:
-                    success = syno.ds.task.create(uri=torrent_url, destination=destination)
                     if success:
-                        logger.info('action=syno_create, tid=%s, destination=%s', tid, destination)
+                        logger.info(
+                            'action=syno_create, tid=%s, destination=%s',
+                            tid,
+                            nas_dir if success else 'default'
+                        )
+                        # Create .loaded file to mark as successfully
+                        # added to Synology
+                        loaded_path = f'{torrent_path}.loaded'
+                        with open(loaded_path, 'w') as f:
+                            f.write('')
+                            
+                        # Add to history
+                        if tid not in history:
+                            history.append(tid)
                     else:
                         logger.error('action=syno_create_fail, tid=%s', tid)
+
+        if syno_client:
+            with syno_client as syno:
+                process_items(syno)
+        else:
+            process_items()
+
+    # Save updated history
+    if history:
+        with open(history_file, 'w') as f:
+            json.dump(history, f, indent=4)
 
 if __name__ == '__main__':
     main()

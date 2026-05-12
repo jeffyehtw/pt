@@ -1,5 +1,10 @@
 {
     "rss": null,
     "key": null,
-    "output": null
+    "skip_check_periods": [],
+    "category_map": {
+        "401": "Movie",
+        "402": "TV",
+        "Other": "Watch"
+    }
 }

@@ -215,4 +215,19 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-*.json
+# Project specific ignores
+config/mt.json
+config/syno.json
+config/path.json
+config/list.json
+config/last_status.json
+config/categories.json
+*.log
+.vscode/
+app.log
+manage.log
+cleanup.log
+search.log
+download.log
+
+
