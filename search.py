@@ -9,7 +9,13 @@ import argparse
 
 from mt.api import MT
 from syno.api import Syno
-from utils import setup_logger, load_config, merge_args_with_config
+from utils import (
+    setup_logger,
+    load_config,
+    merge_args_with_config,
+    resolve_category,
+    get_category_paths
+)
 
 __description__ = 'Search and download torrents from M-Team'
 __epilog__ = 'Search and acquisition completed.'
@@ -149,8 +155,6 @@ def main() -> None:
             )
 
         def process_items(syno: Syno = None) -> None:
-            from utils import resolve_category, get_category_paths, is_torrent_exist
-
             items = mt.search(
                 mode=args.mode,
                 free=args.free,
@@ -178,7 +182,7 @@ def main() -> None:
                 # Skip if already downloaded (unless --force is set)
                 # Use targeted local path for efficiency
                 search_dir = args.output or local_dir
-                if not args.force and is_torrent_exist(
+                if not args.force and mt.exist(
                     tid=tid,
                     search_dir=search_dir,
                     history=history

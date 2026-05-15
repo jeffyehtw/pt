@@ -8,7 +8,13 @@ import argparse
 
 from mt.api import MT
 from syno.api import Syno
-from utils import setup_logger, load_config, merge_args_with_config
+from utils import (
+    setup_logger,
+    load_config,
+    merge_args_with_config,
+    resolve_category,
+    get_category_paths
+)
 
 __description__ = 'Download M-Team torrents by torrent ID'
 __epilog__ = 'Download process completed.'
@@ -95,8 +101,6 @@ def main() -> None:
             )
 
         def process_tids(syno: Syno = None) -> None:
-            from utils import resolve_category, get_category_paths, is_torrent_exist
-
             for tid in args.id:
                 logger.info('tid=%s', tid)
 
@@ -113,7 +117,7 @@ def main() -> None:
                 # Skip if already downloaded (unless --force is set)
                 # Check history list and targeted disk location
                 search_dir = args.output or local_dir
-                if not args.force and is_torrent_exist(
+                if not args.force and mt.exist(
                     tid=tid,
                     search_dir=search_dir,
                     history=history

@@ -6,30 +6,6 @@ import logging
 import argparse
 import glob
 
-def is_torrent_exist(
-    tid: str,
-    search_dir: Optional[str] = None,
-    history: Optional[List[str]] = None
-) -> bool:
-    '''Check if a torrent has already been downloaded'''
-    if history is not None and tid in history:
-        return True
-
-    if search_dir is not None:
-        # Check for the files on disk recursively
-        torrents = glob.glob(
-            os.path.join(search_dir, '**', f'{tid}.torrent'),
-            recursive=True
-        )
-        loaded = glob.glob(
-            os.path.join(search_dir, '**', f'{tid}.torrent.loaded'),
-            recursive=True
-        )
-
-        return len(torrents) > 0 or len(loaded) > 0
-        
-    return False
-
 def setup_logger(
     name: str = None,
     log_file: str = None,
