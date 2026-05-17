@@ -90,8 +90,8 @@ def free(task: str, search_dirs: List[str], tid: str) -> bool:
             break
             
     if not found_file:
-        logger.debug('action=pass, reason=!info')
-        return True
+        logger.debug('action=delete, reason=!info')
+        return False
 
     info = None
     with open(found_file, 'r') as fp:
@@ -190,6 +190,7 @@ def main() -> None:
         )
 
     seeding_days_limit = syno_config.get('seeding_days_limit', 7)
+    stalled_timeout = syno_config.get('stalled_timeout', 3600)
 
     # Merge Synology configuration
     if syno_config:
@@ -291,7 +292,7 @@ def main() -> None:
                     # First time seeing this task, 
                     # use creation/start time as baseline
                     started_time = detail['started_time'] or detail['create_time']
-                    if started_time > 0 and (now_ts - started_time) > 3600:
+                    if started_time > 0 and (now_ts - started_time) > stalled_timeout:
                         # If it's an old task we just started tracking and 
                         # it has 0 pieces, it might be stuck from the start
                         if pieces == 0:
