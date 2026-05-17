@@ -386,8 +386,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-()
-f, indent=4)
-
-if __name__ == '__main__':
-    main()
