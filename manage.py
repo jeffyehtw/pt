@@ -73,6 +73,24 @@ def is_in_skip_period(skip_periods: List) -> Tuple[bool, Optional[Dict]]:
             logger.error('Error parsing skip period: %s', e)
     return False, None
 
+def is_keep_alive(search_dirs: List[str], tid: str) -> bool:
+    '''Check if a task is explicitly marked to be kept alive'''
+    for directory in search_dirs:
+        if not os.path.exists(directory):
+            continue
+        info_files = glob.glob(
+            os.path.join(directory, '**', f'{tid}.info'),
+            recursive=True
+        )
+        if info_files:
+            try:
+                with open(info_files[0], 'r') as fp:
+                    info = json.load(fp)
+                    return info.get('keep_alive', False)
+            except Exception:
+                pass
+    return False
+
 def free(task: str, search_dirs: List[str], tid: str) -> bool:
     '''Check if a task is free'''
     logger.debug('task=%s, tid=%s', task, tid)
@@ -101,20 +119,38 @@ def free(task: str, search_dirs: List[str], tid: str) -> bool:
         logger.debug('action=delete, reason=!info')
         return False
 
-    if info['status']['discountEndTime'] is None:
+    status_info = info.get('status', {})
+    end_times = []
+
+    # Check discountEndTime
+    discount_end = status_info.get('discountEndTime')
+    if discount_end:
+        try:
+            end_times.append(datetime.strptime(discount_end, '%Y-%m-%d %H:%M:%S'))
+        except ValueError:
+            pass
+
+    # Check mallSingleFree endDate
+    mall_free = status_info.get('mallSingleFree')
+    if mall_free and isinstance(mall_free, dict):
+        mall_end = mall_free.get('endDate')
+        if mall_end:
+            try:
+                end_times.append(datetime.strptime(mall_end, '%Y-%m-%d %H:%M:%S'))
+            except ValueError:
+                pass
+
+    if not end_times:
         logger.debug('action=delete, reason=!endtime')
         return False
 
-    end = datetime.strptime(
-        info['status']['discountEndTime'],
-        '%Y-%m-%d %H:%M:%S'
-    )
+    best_end = max(end_times)
     now = datetime.now()
 
-    if end - now < timedelta(minutes=5):
+    if best_end - now < timedelta(minutes=5):
         logger.debug(
             'end=%s, action=delete, reason=!free',
-            info['status']['discountEndTime']
+            best_end.strftime('%Y-%m-%d %H:%M:%S')
         )
         clean(search_dirs=search_dirs, tid=tid)
         return False
@@ -209,9 +245,9 @@ def main() -> None:
         search_dirs.append(args.path)
     
     # Add all local torrent directories from path.json
-    torrent_paths = path_config.get('torrent', {})
-    for path in torrent_paths.values():
-        if path not in search_dirs:
+    for cat_data in path_config.get('categories', {}).values():
+        path = cat_data.get('torrent')
+        if path and path not in search_dirs:
             search_dirs.append(path)
 
     delete_tasks = []
@@ -258,6 +294,10 @@ def main() -> None:
             transfer = item['additional']['transfer']
 
             logger.debug('tid=%s, task=%s, status=%s', tid, task, status)
+
+            if is_keep_alive(search_dirs, tid):
+                logger.debug('action=pass, reason=keep_alive')
+                continue
 
             if status == 'downloading':
                 # Record current progress
