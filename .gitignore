@@ -222,6 +222,8 @@ config/path.json
 config/list.json
 config/last_status.json
 config/categories.json
+config/qbit.json
+cookie.txt
 *.log
 .vscode/
 app.log
@@ -230,4 +232,5 @@ cleanup.log
 search.log
 download.log
 
-
+# IDE
+.antigravitycli/

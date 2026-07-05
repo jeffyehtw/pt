@@ -9,7 +9,10 @@ import argparse
 import glob
 import logging
 
+import logging
+
 from syno.api import Syno
+from qbit.api import Qbit
 from utils import load_config
 
 __description__ = 'Clean up orphaned torrent files and metadata'
@@ -28,19 +31,24 @@ stream_handler.setLevel(logging.INFO)
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 
-def get_active_tids(ip: str, port: str, account: str, password: str) -> Set[str]:
-    '''Retrieve active task IDs from Synology NAS'''
+def get_active_tids(ip: str, port: str, account: str, password: str, client_type: str = 'syno', api_key: str = None) -> Set[str]:
+    '''Retrieve active task IDs from download client'''
     active_tids = set()
     try:
-        with Syno(
-            ip=ip,
-            port=port,
-            account=account,
-            password=password
-        ) as syno:
-            items = syno.ds.task.list()
+        client_cls = Qbit if client_type == 'qbit' else Syno
+        client_kwargs = {
+            'ip': ip,
+            'port': port,
+            'account': account,
+            'password': password
+        }
+        if client_type == 'qbit':
+            client_kwargs['api_key'] = api_key
+
+        with client_cls(**client_kwargs) as client:
+            items = client.list_tasks()
             if items is None:
-                logger.error('Failed to list tasks from Synology')
+                logger.error('Failed to list tasks from %s', client_type)
                 return active_tids
 
             for item in items:
@@ -49,10 +57,10 @@ def get_active_tids(ip: str, port: str, account: str, password: str) -> Set[str]
                 tid = os.path.basename(uri).replace('.torrent', '')
                 if tid:
                     active_tids.add(tid)
-            logger.info('Retrieved %d active tasks from Synology', len(active_tids))
+            logger.info('Retrieved %d active tasks from %s', len(active_tids), client_type)
 
     except Exception as e:
-        logger.error('Failed to connect to Synology: %s', e)
+        logger.error('Failed to connect to %s: %s', client_type, e)
 
     return active_tids
 
@@ -126,6 +134,13 @@ def main() -> None:
         default=False,
         help='Verbose mode'
     )
+    parser.add_argument(
+        '--client',
+        type=str,
+        choices=['syno', 'qbit'],
+        default='syno',
+        help='Download client to use (syno or qbit)'
+    )
     args = parser.parse_args(sys.argv[1:])
 
     # Apply log level
@@ -138,6 +153,7 @@ def main() -> None:
     config_dir = os.path.join(base, 'config')
 
     syno_config = load_config(os.path.join(config_dir, 'syno.json')) or {}
+    qbit_config = load_config(os.path.join(config_dir, 'qbit.json')) or {}
     path_config = load_config(os.path.join(config_dir, 'path.json')) or {}
     history_file = os.path.join(config_dir, 'list.json')
 
@@ -152,8 +168,8 @@ def main() -> None:
 
     # Collect all search directories from path.json
     search_dirs = []
-    torrent_paths = path_config.get('torrent', {})
-    for path in torrent_paths.values():
+    for cat_data in path_config.get('categories', {}).values():
+        path = cat_data.get('torrent')
         if path and path not in search_dirs:
             search_dirs.append(path)
 
@@ -161,16 +177,19 @@ def main() -> None:
         logger.warning('No search directories found in path.json')
         return
 
-    # Get active tasks from Synology
+    # Get active tasks from client
+    client_config = qbit_config if args.client == 'qbit' else syno_config
     active_tids = get_active_tids(
-        ip=syno_config.get('ip'),
-        port=str(syno_config.get('port', '5000')),
-        account=syno_config.get('account'),
-        password=syno_config.get('password')
+        ip=client_config.get('ip'),
+        port=str(client_config.get('port', '8080' if args.client == 'qbit' else '5000')),
+        account=client_config.get('account'),
+        password=client_config.get('password'),
+        client_type=args.client,
+        api_key=client_config.get('api_key')
     )
 
     if not active_tids:
-        logger.warning('No active tasks found or failed to connect to Synology')
+        logger.warning('No active tasks found or failed to connect to client')
         # We proceed anyway because we can still clean based on history
 
     logger.info('Starting cleanup across %d directories', len(search_dirs))

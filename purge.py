@@ -2,13 +2,14 @@
 Utility script to bulk-purge files and directories based on age, keyword, or extension.
 '''
 import os
+import sys
 import shutil
 import argparse
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from utils import setup_logger
+from utils import setup_logger, load_config, get_category_paths
 
 __description__ = 'Delete or trash files based on age, keyword, and extension'
 __epilog__ = 'Purge process completed.'
@@ -121,7 +122,8 @@ def main() -> None:
         description=__description__,
         epilog=__epilog__
     )
-    parser.add_argument('path', type=str, help='Target directory path')
+    parser.add_argument('path', nargs='?', type=str, help='Target directory path (optional if --category is provided)')
+    parser.add_argument('--category', type=str, help='Target category from path.json (e.g., Movie, TV)')
     parser.add_argument('--date', type=str, help='Exact creation date (YYYY-MM-DD)')
     parser.add_argument('--before', type=str, help='Target date or older (YYYY-MM-DD)')
     parser.add_argument('--older-than', type=int, help='Items older than X days')
@@ -147,12 +149,33 @@ def main() -> None:
         logger.error("Error: Dates must be in YYYY-MM-DD format")
         sys.exit(1)
 
-    if not os.path.exists(args.path):
-        logger.error("Error: Path does not exist: %s", args.path)
+    target_path = args.path
+
+    if not target_path and not args.category:
+        logger.error("Error: Must provide either a target path or a --category.")
+        parser.print_help()
+        sys.exit(1)
+
+    if args.category:
+        config_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config')
+        path_config = load_config(os.path.join(config_dir, 'path.json')) or {}
+        
+        category_paths = get_category_paths(args.category, path_config)
+        local_download = category_paths.get('local_download')
+        if not local_download:
+            logger.error("Error: Could not resolve file path for category '%s' in path.json.", args.category)
+            sys.exit(1)
+        
+        # Override the path with the resolved category download dir
+        target_path = local_download
+        logger.info("Resolved category '%s' to path: %s", args.category, target_path)
+
+    if not os.path.exists(target_path):
+        logger.error("Error: Path does not exist: %s", target_path)
         sys.exit(1)
 
     # Execute
-    items = get_files(args.path, recursive=args.recursive)
+    items = get_files(target_path, recursive=args.recursive)
     count = purge_items(
         items=items,
         date=target_date,

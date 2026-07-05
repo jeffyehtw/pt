@@ -1,0 +1,9 @@
+{
+    "ip": "YOUR_IP",
+    "port": "YOUR_PORT",
+    "api_key": "YOUR_API_KEY",
+    "account": "YOUR_USERNAME",
+    "password": "YOUR_PASSWORD",
+    "seeding_days_limit": 7,
+    "stalled_timeout": 3600
+}

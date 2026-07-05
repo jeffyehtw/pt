@@ -8,6 +8,7 @@ import argparse
 
 from mt.api import MT
 from syno.api import Syno
+from qbit.api import Qbit
 from utils import (
     setup_logger,
     load_config,
@@ -60,6 +61,19 @@ def main() -> None:
         default=False,
         help='Download even if the torrent already exists'
     )
+    parser.add_argument(
+        '--keep-alive',
+        action='store_true',
+        default=False,
+        help='Keep the torrent alive in the client by bypassing manage checks'
+    )
+    parser.add_argument(
+        '--client',
+        type=str,
+        choices=['syno', 'qbit'],
+        default='syno',
+        help='Download client to use (syno or qbit)'
+    )
     args = parser.parse_args(sys.argv[1:])
 
     # Setup logger
@@ -76,6 +90,7 @@ def main() -> None:
 
     mt_config = load_config(os.path.join(config_dir, 'mt.json')) or {}
     syno_config = load_config(os.path.join(config_dir, 'syno.json')) or {}
+    qbit_config = load_config(os.path.join(config_dir, 'qbit.json')) or {}
     path_config = load_config(os.path.join(config_dir, 'path.json')) or {}
     categories_map = mt_config.get('category_map', {})
 
@@ -90,17 +105,25 @@ def main() -> None:
             history = json.load(f)
 
     with MT(key=args.key) as mt:
-        # Initialize Synology client if configured
-        syno_client = None
-        if syno_config:
-            syno_client = Syno(
+        # Initialize torrent client if configured
+        torrent_client = None
+        if args.client == 'syno' and syno_config:
+            torrent_client = Syno(
                 ip=syno_config['ip'],
                 port=str(syno_config['port']),
                 account=syno_config['account'],
                 password=syno_config['password']
             )
+        elif args.client == 'qbit' and qbit_config:
+            torrent_client = Qbit(
+                ip=qbit_config['ip'],
+                port=str(qbit_config['port']),
+                api_key=qbit_config.get('api_key'),
+                account=qbit_config.get('account'),
+                password=qbit_config.get('password')
+            )
 
-        def process_tids(syno: Syno = None) -> None:
+        def process_tids(client = None) -> None:
             for tid in args.id:
                 logger.info('tid=%s', tid)
 
@@ -112,7 +135,12 @@ def main() -> None:
                     continue
                 
                 category = resolve_category(detail, categories_map)
-                local_dir, nas_dir = get_category_paths(category, path_config)
+                category_paths = get_category_paths(category, path_config)
+                local_dir = category_paths.get('torrent')
+                if args.client == 'qbit':
+                    nas_dir = category_paths.get('qbit_download')
+                else:
+                    nas_dir = category_paths.get('remote_download')
 
                 # Skip if already downloaded (unless --force is set)
                 # Check history list and targeted disk location
@@ -124,6 +152,9 @@ def main() -> None:
                 ):
                     logger.info('action=skip, reason=exist')
                     continue
+
+                if args.keep_alive:
+                    detail['keep_alive'] = True
 
                 if args.verbose:
                     logger.info(
@@ -175,9 +206,9 @@ def main() -> None:
                     )
                     continue
 
-                # Create Synology task if configured
-                if syno:
-                    success = syno.ds.task.create(
+                # Create task in client if configured
+                if client:
+                    success = client.create_task(
                         file=torrent_path,
                         destination=nas_dir
                     )
@@ -185,19 +216,19 @@ def main() -> None:
                     # Fallback to default destination if the specific one fails
                     if not success and nas_dir:
                         logger.warning(
-                            'action=syno_create_retry, tid=%s, '
+                            'action=client_create_retry, tid=%s, '
                             'reason=fail_with_destination, destination=%s',
                             tid,
                             nas_dir
                         )
-                        success = syno.ds.task.create(
+                        success = client.create_task(
                             file=torrent_path,
                             destination=None
                         )
 
                     if success:
                         logger.info(
-                            'action=syno_create, tid=%s, method=file, '
+                            'action=client_create, tid=%s, method=file, '
                             'destination=%s',
                             tid,
                             nas_dir if success else 'default'
@@ -212,11 +243,11 @@ def main() -> None:
                         if tid not in history:
                             history.append(tid)
                     else:
-                        logger.error('action=syno_create_fail, tid=%s', tid)
+                        logger.error('action=client_create_fail, tid=%s', tid)
 
-        if syno_client:
-            with syno_client as syno:
-                process_tids(syno)
+        if torrent_client:
+            with torrent_client as client:
+                process_tids(client)
         else:
             process_tids()
 

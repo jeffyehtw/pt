@@ -91,13 +91,7 @@ def resolve_category(detail: dict, categories_map: dict) -> str:
 
     return 'Watch'
 
-def get_category_paths(category: str, path_config: dict) -> tuple[str, str]:
-    '''Return (local_torrent_dir, nas_download_dir) for a given category'''
-    # Use the specific category or fall back to 'Watch' (or None)
-    local_dir = path_config.get('torrent', {}).get(category) or \
-                path_config.get('torrent', {}).get('Watch')
-    
-    nas_dir = path_config.get('file', {}).get(category) or \
-              path_config.get('file', {}).get('Watch')
-
-    return local_dir, nas_dir
+def get_category_paths(category: str, path_config: dict) -> dict:
+    '''Return the paths dictionary for a given category'''
+    categories = path_config.get('categories', {})
+    return categories.get(category) or categories.get('Watch') or {}

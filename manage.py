@@ -11,7 +11,10 @@ import glob
 
 from datetime import datetime, timedelta
 
+from datetime import datetime, timedelta
+
 from syno.api import Syno
+from qbit.api import Qbit
 from utils import load_config
 
 __description__ = 'Synology Download Station Task Manager'
@@ -165,28 +168,11 @@ def main() -> None:
         epilog=__epilog__
     )
     parser.add_argument(
-        '--ip',
+        '--client',
         type=str,
-        default=None,
-        help='Synology NAS IP address'
-    )
-    parser.add_argument(
-        '--port',
-        type=str,
-        default=None,
-        help='Synology NAS port'
-    )
-    parser.add_argument(
-        '--account',
-        type=str,
-        default=None,
-        help='Synology NAS user account'
-    )
-    parser.add_argument(
-        '--password',
-        type=str,
-        default=None,
-        help='Synology NAS user password'
+        choices=['syno', 'qbit'],
+        default='syno',
+        help='Client to manage (syno or qbit)'
     )
     parser.add_argument(
         '--path',
@@ -212,6 +198,7 @@ def main() -> None:
 
     mt_config = load_config(os.path.join(config_dir, 'mt.json')) or {}
     syno_config = load_config(os.path.join(config_dir, 'syno.json')) or {}
+    qbit_config = load_config(os.path.join(config_dir, 'qbit.json')) or {}
     path_config = load_config(os.path.join(config_dir, 'path.json')) or {}
 
     # Check for skip periods (only affects free leech check)
@@ -228,16 +215,24 @@ def main() -> None:
     seeding_days_limit = syno_config.get('seeding_days_limit', 7)
     stalled_timeout = syno_config.get('stalled_timeout', 3600)
 
-    # Merge Synology configuration
-    if syno_config:
-        if args.ip is None:
-            args.ip = syno_config.get('ip')
-        if args.port is None:
-            args.port = str(syno_config.get('port', '5000'))
-        if args.account is None:
-            args.account = syno_config.get('account')
-        if args.password is None:
-            args.password = syno_config.get('password')
+    # Extract client configuration
+    ip = None
+    port = None
+    account = None
+    password = None
+    api_key = None
+
+    if args.client == 'syno' and syno_config:
+        ip = syno_config.get('ip')
+        port = str(syno_config.get('port', '5000'))
+        account = syno_config.get('account')
+        password = syno_config.get('password')
+    elif args.client == 'qbit' and qbit_config:
+        ip = qbit_config.get('ip')
+        port = str(qbit_config.get('port', '8080'))
+        account = qbit_config.get('account')
+        password = qbit_config.get('password')
+        api_key = qbit_config.get('api_key')
 
     # Collect all search directories
     search_dirs = []
@@ -269,15 +264,20 @@ def main() -> None:
     
     current_status = {}
 
-    with Syno(
-        ip=args.ip,
-        port=args.port,
-        account=args.account,
-        password=args.password
-    ) as syno:
+    client_cls = Qbit if args.client == 'qbit' else Syno
+    client_kwargs = {
+        'ip': ip,
+        'port': port,
+        'account': account,
+        'password': password
+    }
+    if args.client == 'qbit':
+        client_kwargs['api_key'] = api_key
+
+    with client_cls(**client_kwargs) as client:
         logger.debug('action=login')
 
-        items = syno.ds.task.list()
+        items = client.list_tasks()
         if items is None:
             logger.error('Failed to list tasks')
             return
@@ -409,7 +409,7 @@ def main() -> None:
 
         if not args.dry_run:
             if len(delete_tasks) > 0:
-                syno.ds.task.delete(tasks=[t['id'] for t in delete_tasks])
+                client.delete_tasks(tasks=[t['id'] for t in delete_tasks])
                 # Clean up local files for deleted tasks
                 for t in delete_tasks:
                     clean(search_dirs=search_dirs, tid=t['tid'])
@@ -418,7 +418,7 @@ def main() -> None:
                         del current_status[t['id']]
 
             if len(resume_tasks) > 0:
-                syno.ds.task.resume(tasks=[t['id'] for t in resume_tasks])
+                client.resume_tasks(tasks=[t['id'] for t in resume_tasks])
 
     # Save current status for next run
     if not args.dry_run:
