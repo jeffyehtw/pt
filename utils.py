@@ -92,6 +92,37 @@ def resolve_category(detail: dict, categories_map: dict) -> str:
     return 'Watch'
 
 def get_category_paths(category: str, path_config: dict) -> dict:
-    '''Return the paths dictionary for a given category'''
-    categories = path_config.get('categories', {})
-    return categories.get(category) or categories.get('Watch') or {}
+    '''Return the paths dictionary for a given category by merging with base_paths'''
+    base_paths = path_config.get('base_paths')
+    if not base_paths:
+        # Fallback to old categories format if base_paths isn't present
+        categories = path_config.get('categories', {})
+        return categories.get(category) or categories.get('Watch') or {}
+        
+    def build_path(base, cat):
+        return os.path.join(base, cat) if base else ''
+        
+    remote = base_paths.get('remote', {})
+    local = base_paths.get('local', {})
+
+    paths = {
+        'torrents': build_path(base_paths.get('torrents', ''), category),
+        'remote': {
+            'synology': build_path(remote.get('synology', ''), category),
+            'qbit': build_path(remote.get('qbit', ''), category)
+        },
+        'local': {
+            'synology': build_path(local.get('synology', ''), category),
+            'qbit': build_path(local.get('qbit', ''), category)
+        }
+    }
+    
+    # Auto-create local directories if they don't exist
+    for path in [paths['torrents'], paths['local']['synology'], paths['local']['qbit']]:
+        if path and not os.path.exists(path):
+            try:
+                os.makedirs(path, exist_ok=True)
+            except OSError:
+                pass # Ignore if we don't have permission or if it's a remote path mapped incorrectly
+                
+    return paths

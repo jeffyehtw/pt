@@ -71,7 +71,7 @@ def main() -> None:
         '--client',
         type=str,
         choices=['syno', 'qbit'],
-        default='syno',
+        default='qbit',
         help='Download client to use (syno or qbit)'
     )
     args = parser.parse_args(sys.argv[1:])
@@ -136,11 +136,11 @@ def main() -> None:
                 
                 category = resolve_category(detail, categories_map)
                 category_paths = get_category_paths(category, path_config)
-                local_dir = category_paths.get('torrent')
+                local_dir = category_paths.get('torrents')
                 if args.client == 'qbit':
-                    nas_dir = category_paths.get('qbit_download')
+                    nas_dir = category_paths.get('remote', {}).get('qbit')
                 else:
-                    nas_dir = category_paths.get('remote_download')
+                    nas_dir = category_paths.get('remote', {}).get('synology')
 
                 # Skip if already downloaded (unless --force is set)
                 # Check history list and targeted disk location
@@ -148,7 +148,8 @@ def main() -> None:
                 if not args.force and mt.exist(
                     tid=tid,
                     search_dir=search_dir,
-                    history=history
+                    history=history,
+                    check_loaded=(client is not None)
                 ):
                     logger.info('action=skip, reason=exist')
                     continue

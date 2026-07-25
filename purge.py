@@ -124,6 +124,8 @@ def main() -> None:
     )
     parser.add_argument('path', nargs='?', type=str, help='Target directory path (optional if --category is provided)')
     parser.add_argument('--category', type=str, help='Target category from path.json (e.g., Movie, TV)')
+    parser.add_argument('--client', type=str, choices=['synology', 'qbit'], default='synology', help='Which client local path to use from path.json when category is provided (default: synology)')
+    parser.add_argument('--torrents', action='store_true', help='Target the torrents directory for the category instead of the client local path')
     parser.add_argument('--date', type=str, help='Exact creation date (YYYY-MM-DD)')
     parser.add_argument('--before', type=str, help='Target date or older (YYYY-MM-DD)')
     parser.add_argument('--older-than', type=int, help='Items older than X days')
@@ -161,14 +163,21 @@ def main() -> None:
         path_config = load_config(os.path.join(config_dir, 'path.json')) or {}
         
         category_paths = get_category_paths(args.category, path_config)
-        local_download = category_paths.get('local_download')
-        if not local_download:
-            logger.error("Error: Could not resolve file path for category '%s' in path.json.", args.category)
+        
+        if args.torrents:
+            resolved_path = category_paths.get('torrents')
+            path_type = 'torrents'
+        else:
+            resolved_path = category_paths.get('local', {}).get(args.client)
+            path_type = args.client
+
+        if not resolved_path:
+            logger.error("Error: Could not resolve local file path for category '%s' with type '%s' in path.json.", args.category, path_type)
             sys.exit(1)
         
         # Override the path with the resolved category download dir
-        target_path = local_download
-        logger.info("Resolved category '%s' to path: %s", args.category, target_path)
+        target_path = resolved_path
+        logger.info("Resolved category '%s' (%s) to path: %s", args.category, path_type, target_path)
 
     if not os.path.exists(target_path):
         logger.error("Error: Path does not exist: %s", target_path)

@@ -119,7 +119,7 @@ def main() -> None:
         '--client',
         type=str,
         choices=['syno', 'qbit'],
-        default='syno',
+        default='qbit',
         help='Download client to use (syno or qbit)'
     )
     args = parser.parse_args(sys.argv[1:])
@@ -195,11 +195,11 @@ def main() -> None:
                 # Resolve category and paths
                 category = resolve_category(detail, categories_map)
                 category_paths = get_category_paths(category, path_config)
-                local_dir = category_paths.get('torrent')
+                local_dir = category_paths.get('torrents')
                 if args.client == 'qbit':
-                    nas_dir = category_paths.get('qbit_download')
+                    nas_dir = category_paths.get('remote', {}).get('qbit')
                 else:
-                    nas_dir = category_paths.get('remote_download')
+                    nas_dir = category_paths.get('remote', {}).get('synology')
 
                 # Skip if already downloaded (unless --force is set)
                 # Use targeted local path for efficiency

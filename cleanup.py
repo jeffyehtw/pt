@@ -138,7 +138,7 @@ def main() -> None:
         '--client',
         type=str,
         choices=['syno', 'qbit'],
-        default='syno',
+        default='qbit',
         help='Download client to use (syno or qbit)'
     )
     args = parser.parse_args(sys.argv[1:])
@@ -168,10 +168,16 @@ def main() -> None:
 
     # Collect all search directories from path.json
     search_dirs = []
-    for cat_data in path_config.get('categories', {}).values():
-        path = cat_data.get('torrent')
+    base_paths = path_config.get('base_paths')
+    if base_paths:
+        path = base_paths.get('torrents')
         if path and path not in search_dirs:
             search_dirs.append(path)
+    else:
+        for cat_data in path_config.get('categories', {}).values():
+            path = cat_data.get('torrents')
+            if path and path not in search_dirs:
+                search_dirs.append(path)
 
     if not search_dirs:
         logger.warning('No search directories found in path.json')

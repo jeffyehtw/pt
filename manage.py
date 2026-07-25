@@ -46,22 +46,19 @@ def clean(search_dirs: List[str], tid: str) -> None:
     logger.debug('tid=%s', tid)
 
     for directory in search_dirs:
-        if not os.path.exists(directory):
-            continue
-            
-        info_files = glob.glob(
-            os.path.join(directory, '**', f'{tid}.info'),
-            recursive=True
-        )
-        for info in info_files:
-            os.remove(info)
+        info_file = os.path.join(directory, f'{tid}.info')
+        if os.path.exists(info_file):
+            try:
+                os.remove(info_file)
+            except OSError:
+                pass
 
-        loaded_files = glob.glob(
-            os.path.join(directory, '**', f'{tid}.torrent.loaded'),
-            recursive=True
-        )
-        for loaded in loaded_files:
-            os.remove(loaded)
+        loaded_file = os.path.join(directory, f'{tid}.torrent.loaded')
+        if os.path.exists(loaded_file):
+            try:
+                os.remove(loaded_file)
+            except OSError:
+                pass
 
 def is_in_skip_period(skip_periods: List) -> Tuple[bool, Optional[Dict]]:
     '''Check if current time falls within any skip period'''
@@ -79,15 +76,10 @@ def is_in_skip_period(skip_periods: List) -> Tuple[bool, Optional[Dict]]:
 def is_keep_alive(search_dirs: List[str], tid: str) -> bool:
     '''Check if a task is explicitly marked to be kept alive'''
     for directory in search_dirs:
-        if not os.path.exists(directory):
-            continue
-        info_files = glob.glob(
-            os.path.join(directory, '**', f'{tid}.info'),
-            recursive=True
-        )
-        if info_files:
+        info_file = os.path.join(directory, f'{tid}.info')
+        if os.path.exists(info_file):
             try:
-                with open(info_files[0], 'r') as fp:
+                with open(info_file, 'r') as fp:
                     info = json.load(fp)
                     return info.get('keep_alive', False)
             except Exception:
@@ -100,14 +92,9 @@ def free(task: str, search_dirs: List[str], tid: str) -> bool:
     
     found_file = None
     for directory in search_dirs:
-        if not os.path.exists(directory):
-            continue
-        info_files = glob.glob(
-            os.path.join(directory, '**', f'{tid}.info'),
-            recursive=True
-        )
-        if info_files:
-            found_file = info_files[0]
+        info_file = os.path.join(directory, f'{tid}.info')
+        if os.path.exists(info_file):
+            found_file = info_file
             break
             
     if not found_file:
@@ -171,7 +158,7 @@ def main() -> None:
         '--client',
         type=str,
         choices=['syno', 'qbit'],
-        default='syno',
+        default='qbit',
         help='Client to manage (syno or qbit)'
     )
     parser.add_argument(
@@ -240,10 +227,19 @@ def main() -> None:
         search_dirs.append(args.path)
     
     # Add all local torrent directories from path.json
-    for cat_data in path_config.get('categories', {}).values():
-        path = cat_data.get('torrent')
-        if path and path not in search_dirs:
-            search_dirs.append(path)
+    base_paths = path_config.get('base_paths')
+    if base_paths:
+        base_torrent = base_paths.get('torrents')
+        if base_torrent:
+            for cat in ['Movie', 'TV', 'Adult', 'Music', 'Watch']:
+                path = os.path.join(base_torrent, cat)
+                if path not in search_dirs:
+                    search_dirs.append(path)
+    else:
+        for cat_data in path_config.get('categories', {}).values():
+            path = cat_data.get('torrents')
+            if path and path not in search_dirs:
+                search_dirs.append(path)
 
     delete_tasks = []
     resume_tasks = []
