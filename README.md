@@ -49,11 +49,12 @@ The core automation engine, typically run via cron.
 *   **Dynamic Seeding Limits**: Enforces seeding limits defined in `syno.json`.
 
 ### 2. `cleanup.py` (The Janitor)
-Synchronizes your local filesystem with the state of the NAS.
+Synchronizes your local filesystem with the state of the download client (qBittorrent or Synology).
 
-1.  **History Update**: Processes `.loaded` markers to update the central `list.json`.
-2.  **Torrent Cleanup**: Removes raw `.torrent` files that have already been recorded as successful.
-3.  **Orphaned Info**: Removes `.info` metadata files for tasks that no longer exist on the NAS.
+1.  **Broken Task Removal**: Automatically detects and deletes tasks in an "Error" or "Missing Files" state from the download client (e.g., when you've purged the downloaded files).
+2.  **History Update**: Processes `.loaded` markers to update the central `list.json`.
+3.  **Torrent Cleanup**: Removes raw `.torrent` files that have already been recorded as successful.
+4.  **Orphaned Info**: Removes `.info` metadata files for tasks that no longer exist on the client.
 
 ### 3. `search.py` (The Seeker)
 Interactive tool to search M-Team and create categorized Synology tasks.
