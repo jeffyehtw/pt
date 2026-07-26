@@ -31,8 +31,11 @@ stream_handler.setLevel(logging.INFO)
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 
-def get_active_tids(ip: str, port: str, account: str, password: str, client_type: str = 'syno', api_key: str = None) -> Set[str]:
-    '''Retrieve active task IDs from download client'''
+def get_active_tids(
+    ip: str, port: str, account: str, password: str, client_type: str = 'syno',
+    api_key: str = None, dry_run: bool = False
+) -> Set[str]:
+    '''Retrieve active task IDs from download client and delete broken ones'''
     active_tids = set()
     try:
         client_cls = Qbit if client_type == 'qbit' else Syno
@@ -51,12 +54,34 @@ def get_active_tids(ip: str, port: str, account: str, password: str, client_type
                 logger.error('Failed to list tasks from %s', client_type)
                 return active_tids
 
+            tasks_to_delete = []
+
             for item in items:
+                # Check for errored tasks (e.g. missing files due to deletion)
+                if item.get('status') == 'error':
+                    task_id = item.get('id')
+                    if task_id:
+                        tasks_to_delete.append(task_id)
+                    continue
+
                 # Extract TID from the torrent URI
                 uri = item.get('additional', {}).get('detail', {}).get('uri', '')
                 tid = os.path.basename(uri).replace('.torrent', '')
                 if tid:
                     active_tids.add(tid)
+
+            if tasks_to_delete:
+                logger.info('Found %d errored/missing tasks in client.', len(tasks_to_delete))
+                if dry_run:
+                    logger.info('[Dry Run] Would delete errored tasks from client: %s', tasks_to_delete)
+                else:
+                    logger.info('Deleting errored tasks from client...')
+                    try:
+                        client.delete_tasks(tasks_to_delete)
+                        logger.info('Successfully deleted errored tasks.')
+                    except Exception as e:
+                        logger.error('Failed to delete errored tasks: %s', e)
+
             logger.info('Retrieved %d active tasks from %s', len(active_tids), client_type)
 
     except Exception as e:
@@ -191,7 +216,8 @@ def main() -> None:
         account=client_config.get('account'),
         password=client_config.get('password'),
         client_type=args.client,
-        api_key=client_config.get('api_key')
+        api_key=client_config.get('api_key'),
+        dry_run=args.dry_run
     )
 
     if not active_tids:
